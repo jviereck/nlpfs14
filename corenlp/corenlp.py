@@ -32,7 +32,7 @@ from progressbar import ProgressBar, Fraction
 from unidecode import unidecode
 from subprocess import call
 
-VERBOSE = False
+VERBOSE = True
 STATE_START, STATE_TEXT, STATE_WORDS, STATE_TREE, STATE_DEPENDENCY, STATE_COREFERENCE = 0, 1, 2, 3, 4, 5
 WORD_PATTERN = re.compile('\[([^\]]+)\]')
 CR_PATTERN = re.compile(r"\((\d*),(\d)*,\[(\d*),(\d*)\]\) -> \((\d*),(\d)*,\[(\d*),(\d*)\]\), that is: \"(.*)\" -> \"(.*)\"")
@@ -382,6 +382,39 @@ def parse_xml_output(input_dir, corenlp_path=DIRECTORY, memory="3g", raw_output=
                                                raw_output=raw_output)
     finally:
         file_list.close()
+        shutil.rmtree(xml_dir)
+    # return result
+
+
+def batch_parse_filelist(file_list_path, corenlp_path=DIRECTORY, memory="3g", raw_output=False, properties='default.properties'):
+    """Because interaction with the command-line interface of the CoreNLP
+    tools is limited to very short text bits, it is necessary to parse xml
+    output"""
+    #First, we change to the directory where we place the xml files from the
+    #parser:
+
+    xml_dir = tempfile.mkdtemp()
+
+    command = init_corenlp_command(corenlp_path, memory, properties)\
+        + ' -filelist %s -outputDirectory %s' % (file_list_path, xml_dir)
+
+    #creates the xml file of parser output:
+
+    print command
+    call(command, shell=True)
+
+    #reading in the raw xml file:
+    # result = []
+    try:
+        for output_file in os.listdir(xml_dir):
+            with open(xml_dir + '/' + output_file, 'r') as xml:
+                # parsed = xml.read()
+                file_name = re.sub('.xml$', '', os.path.basename(output_file))
+                # result.append(parse_parser_xml_results(xml.read(), file_name,
+                #                                        raw_output=raw_output))
+                yield parse_parser_xml_results(xml.read(), file_name,
+                                               raw_output=raw_output)
+    finally:
         shutil.rmtree(xml_dir)
     # return result
 

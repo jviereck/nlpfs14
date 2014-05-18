@@ -12,4 +12,4 @@ __license__ = 'GNU v2+'
 # classes
 from corenlp import StanfordCoreNLP, ParserError, TimeoutError, ProcessError
 # functions
-from corenlp import batch_parse
+from corenlp import batch_parse, batch_parse_filelist
