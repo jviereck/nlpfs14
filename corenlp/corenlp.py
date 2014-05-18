@@ -40,7 +40,7 @@ CR_PATTERN = re.compile(r"\((\d*),(\d)*,\[(\d*),(\d*)\]\) -> \((\d*),(\d)*,\[(\d
 if os.environ.has_key("CORENLP"):
     DIRECTORY = os.environ["CORENLP"]
 else:
-    DIRECTORY = "stanford-corenlp-full-2013-11-12"
+    DIRECTORY = "stanford-corenlp"
 
 class bc:
     HEADER = '\033[95m'
@@ -93,8 +93,8 @@ def init_corenlp_command(corenlp_path, memory, properties):
     Spawns the server as a process.
     """
 
-    jars = ["stanford-corenlp-3.3.0.jar",
-            "stanford-corenlp-3.3.0-models.jar",
+    jars = ["stanford-corenlp-3.3.1.jar",
+            "stanford-corenlp-3.3.1-models.jar",
             "xom.jar",
             "joda-time.jar",
             "jollyday.jar",
