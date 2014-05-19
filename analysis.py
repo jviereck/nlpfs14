@@ -62,19 +62,27 @@ if __name__ == '__main__':
     # REQUIRED: Install `xmltodict` using pip.
     parseRes = corenlp.batch_parse_filelist('tmp/filelist.txt')
 
-    for doc in docs:
-        doc.ext['coreNLP'] = next(parseRes)
+    # NOTE: The order in which the files come back from the parseRes generator
+    # is determined by a sort on the input file's name.
+    i = 0
+    it = iter(parseRes)
+    for parsed_data in it:
+        file_name = parsed_data['file_name']
 
-     # nlpio.stanfordParse('The world is so pretty.')
+        found = False
+        for doc in docs:
+            if doc.name == file_name:
+                write_file('output/' + doc.name.replace('.', '_') + '.json',
+                    json.dumps({
+                        'path': doc.path,
+                        'models': doc.models,
+                        'parse': parsed_data
+                    },indent=2))
+                found = True
+                break
 
-    print 'Writing output files'
-    for doc in docs:
-        write_file('output/' + doc.name.replace('.', '_') + '.json',
-            json.dumps({
-                'path': doc.path,
-                'models': doc.models,
-                'parse': doc.ext['coreNLP']
-            },indent=2))
+        if not found:
+            raise Exception('Could not find document for parsed tree: ' + file_name)
 
 
 

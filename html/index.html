@@ -6,11 +6,16 @@
     <title>NLP Analysis Tool</title>
   </head>
   <body>
-    <h3>Models</h3>
+    Navigate Articles:
+    <button onclick="showPrevious()">Previous</button>
+    <button onclick="showNext()">Next</button>
+    <button onclick="showRandom()">Random!</button>
+    <h3>Models: <span id="article"></span></h3>
     <div id="models"></div>
     <h3>Corefs</h3>
     <div id="coref"></div>
-    <div id="text"></div>
+    <h3>Sentences</h3>
+    <div id="sentences"></div>
 <script>
   var files = [];
   var currentFileIdx = -1;
@@ -18,16 +23,33 @@
   var corefs = [];
   var sentences = [];
 
+  function emitAttr(tag, attr) {
+    out = '<' + tag;
+    for (key in (attr || {})) {
+      out += ' ' + key + '="' + attr[key] + '"';
+    }
+    out += '>';
+    return out;
+  }
+
   function setHTML(id, content) {
     document.getElementById(id).innerHTML = content;
+  }
+
+  function div(str, attr) {
+    return emitAttr('div', attr) + str + '</div>';
+  }
+
+  function span(str, attr) {
+    return emitAttr('span', attr) + str + '</span>';
   }
 
   function table(str) {
     return '<table>' + str + '</table>';
   }
 
-  function tr(str) {
-    return '<tr>' + str + '</tr>';
+  function tr(str, attr) {
+    return emitAttr('tr', attr) + str + '</tr>';
   }
 
   function td(str) {
@@ -77,29 +99,42 @@
 
   function parseData(data) {
     parseCorefs(data.parse);
+
+    data.parse.sentences.forEach(function(sentence) {
+      sentence.content = sentence.text.join(' ');
+    })
   }
 
+
+
   function updateUI() {
-    function mapCoref(coref) {
+    function mapCoref(coref, cidx) {
       var rep = coref.refs[0];
       var headWord = sentences[rep.sentence].words[rep.head];
 
       return tr(
         td(coref.refs.length) +
         td(strong(coref.representive)) +
-        td(headWord[1].NamedEntityTag + '/' + headWord[1].PartOfSpeech)
+        td(headWord[1].NamedEntityTag + '/' + headWord[1].PartOfSpeech + '/' + headWord[0]),
+        {'data-coref': cidx}
       )
     }
 
+    function mapSentence(sentence, sidx) {
+      return li(sentence.words.map(function(word, widx) {
+        return span(word[0] + ' ', {id: 'w_' + sidx + '_' + widx});
+      }).join(''));
+    }
+
+    setHTML('article', files[currentFileIdx])
     setHTML('models', ul(data.models.map(li).join('')));
     setHTML('coref', table(corefs.map(mapCoref).join('')));
-
+    setHTML('sentences', ul(sentences.map(mapSentence).join('')));
 
   }
 
-  function showNext() {
-    currentFileIdx += 1;
-    $.getJSON(files[currentFileIdx], function(json) {
+  function currentFileIndexChanged() {
+    $.getJSON('data/' + files[currentFileIdx], function(json) {
       data = json;
       sentences = data.parse.sentences;
 
@@ -108,12 +143,56 @@
     });
   }
 
+  function showPrevious() {
+    currentFileIdx = Math.max(1, currentFileIdx - 1);
+    currentFileIndexChanged();
+  }
+
+  function showNext() {
+    currentFileIdx = Math.min(files.length - 1, currentFileIdx + 1);
+    currentFileIndexChanged();
+  }
+
+  function showRandom() {
+    currentFileIdx = Math.round(Math.random() * (files.length - 1));
+    currentFileIndexChanged();
+  }
+
+
   $.get('filelist.txt', function(data) {
     files = data.split('\n').map(function(str) {
       return str.substring(4).replace('.', '_') + '.json';
     });
 
     showNext();
+  })
+
+  function isPunctuation(str) {
+    return ([',', '``', "''", '.'].indexOf(str) !== -1);
+  }
+
+  colorIdx = 10;
+
+  $(document).on('click', 'tr', function(evt) {
+    var self = $(this);
+    var color;
+    if (self.data('toggled') == true) {
+      self.data('toggled', '')
+      color = '';
+    } else {
+      self.data('toggled', 'true')
+      color = 'hsl(' + (colorIdx += 55) % 360 +', 50%, 80%)'
+    }
+
+    self.attr('style', 'background: ' + color);
+
+    var coref = corefs[self.data('coref')];
+    coref.refs.forEach(function(ref) {
+      var sidx = ref.sentence;
+      for (var widx = ref.start; widx < ref.end; widx++) {
+        document.getElementById('w_' + sidx + '_' + widx).style.background = color;
+      }
+    })
   })
 </script>
 
