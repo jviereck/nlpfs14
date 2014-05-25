@@ -1,8 +1,8 @@
 function Document(data, excludeWords) {
-	this.data = data;
-	this.excludeWords = excludeWords;
+  this.data = data;
+  this.excludeWords = excludeWords;
 
-	this.corefs = [];
+  this.corefs = [];
   this.sentences = [];
   this.words = [];
   this.wordsSorted = [];
@@ -13,19 +13,23 @@ function Document(data, excludeWords) {
 }
 
 Document.prototype.parseCorefs = function() {
-	this.corefs = this.data.parse.coref.map(function(entries) {
+  var self = this;
+  this.corefs = this.data.parse.coref.map(function(entries) {
     var obj = {
       representive: entries[0][1][0],
       refs: []
     }
     function addRef(subEntry) {
-      obj.refs.push({
+      var newRef = {
         text: subEntry[0],
         sentence: subEntry[1],
         head: subEntry[2],
         start: subEntry[3],
-        end: subEntry[4]
-      });
+        end: subEntry[4],
+        parent: obj
+      };
+      obj.refs.push(newRef);
+      self.sentences[newRef.sentence].corefs.push(newRef);
     }
 
     // Add the representive itself to the references.
@@ -42,12 +46,11 @@ Document.prototype.parseCorefs = function() {
 }
 
 Document.prototype.parseData = function() {
-	this.words = {};
-  this.parseCorefs();
-
+  this.words = {};
   this.sentences = this.data.parse.sentences;
 
   this.data.parse.sentences.forEach(function(sentence, sidx) {
+    sentence.corefs = [];
     sentence.content = sentence.text.join(' ');
 
     // This adds the `parseNode` on each word.
@@ -95,6 +98,36 @@ Document.prototype.parseData = function() {
   }).filter(function(word) {
     return word.refs.length >= 3; // Only keep words that are mentioned 3 or more times.
   })
+
+  this.parseCorefs();
+}
+
+function doIntersect(a, b) {
+  return (b.start < a.end && a.end <= b.end) ||
+      (b.start <= a.start && a.start < b.end);
+}
+
+Document.prototype.removeSayPhase = function() {
+  this.sentences.forEach(function(sentence) {
+    var says = matchSayPhase(sentence.parseRoot);
+
+    says.forEach(function(say) {
+      // Mark the words that match with the says as "ignore".
+      var words = sentence.words;
+      for (var i = say.start; i < say.end; i++) {
+        words[i][1].Ignore = 'SayPhase';
+      }
+
+      // Look for coreferences inside of say-phrases and remove them.
+      for (var i = sentence.corefs.length - 1; i >= 0; i--) {
+        if (doIntersect(sentence.corefs[i], say)) {
+          var ref = sentence.corefs.splice(i, 1)[0];
+          var parentRefs = ref.parent.refs;
+          parentRefs.splice(parentRefs.indexOf(ref), 1);
+        }
+      }
+    });
+  }, this);
 }
 
 // ############################################################################
@@ -184,7 +217,7 @@ function parseSentenceTree(sentence) {
 }
 
 if (typeof exports !== 'undefined') {
-	exports.Document = Document;
+  exports.Document = Document;
 }
 
 
