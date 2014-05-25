@@ -24,6 +24,8 @@
     <div id="models"></div>
     <h3>Corefs</h3>
     <div id="coref"></div>
+    <h3>Words</h3>
+    <div id="words"></div>
     <h3>
       Sentences
       <button onclick="removeSayPhase()">RemoveSayPhase</button>
@@ -125,6 +127,16 @@
       )
     }
 
+    function mapWords(word, cidx) {
+      var wordInfo = word.refs[0].word;
+      return tr(
+        td(word.refs.length) +
+        td(strong(word.lemma)) +
+        td(wordInfo.NamedEntityTag + '/' + wordInfo.PartOfSpeech),
+        {'data-word': cidx}
+      )
+    }
+
     function mapSentence(sentence, sidx) {
       return li(sentence.words.map(function(word, widx) {
         return span(word[0] + ' ', {
@@ -138,6 +150,7 @@
     setHTML('models', ul(doc.data.models.map(li).join('')));
     setHTML('score_sentence', ul(doc.getRefRankedSentence().map(li).join('')));
     setHTML('coref', table(doc.corefs.map(mapCoref).join('')));
+    setHTML('words', table(doc.wordsSorted.map(mapWords).join('')));
     setHTML('sentences', ul(doc.sentences.map(mapSentence).join('')));
 
   }
@@ -145,9 +158,14 @@
   function currentFileIndexChanged() {
     $.getJSON('data/' + files[currentFileIdx], function(json) {
       doc = new Document(json, excludeWords);
-      doc.refSentences = sentenceRanking[doc.parse.file_name];
+      doc.setRefSentences(sentenceRanking[doc.parse.file_name]);
+      doc.removeSayPhase();
+      doc.weightWords();
+
       s = doc.sentences[0];
       updateUI();
+
+      location.hash = '#file=' + doc.parse.file_name.replace('.', '_');
     });
   }
 
@@ -166,11 +184,14 @@
     currentFileIndexChanged();
   }
 
-  function selectArticle() {
-    var name = prompt('Give me the name of the article to show:');
+  function selectArticle(name) {
     if (!name) {
-      return;
+      name = prompt('Give me the name of the article to show:');
+      if (!name) {
+        return;
+      }
     }
+
     name = name.replace('.', '_');
     var idx = files.indexOf(name + '.json');
     if (idx === -1) {
@@ -187,7 +208,12 @@
       return str.substring(4).replace('.', '_') + '.json';
     });
 
-    showNext();
+    if (location.hash.indexOf('file=') === -1) {
+      showNext();
+    } else {
+      selectArticle(location.hash.substring(6));
+    }
+
   })
 
   function isPunctuation(str) {
@@ -209,13 +235,23 @@
 
     self.attr('style', 'background: ' + color);
 
-    var coref = doc.corefs[self.data('coref')];
-    coref.refs.forEach(function(ref) {
-      var sidx = ref.sentence;
-      for (var widx = ref.start; widx < ref.end; widx++) {
+    if (self.data('coref')) {
+      var coref = doc.corefs[self.data('coref')];
+      coref.refs.forEach(function(ref) {
+        var sidx = ref.sentence;
+        for (var widx = ref.start; widx < ref.end; widx++) {
+          document.getElementById('w_' + sidx + '_' + widx).style.background = color;
+        }
+      })
+    } else {
+      var word = doc.wordsSorted[self.data('word')];
+      word.refs.forEach(function(ref) {
+        var sidx = ref.sidx;
+        var widx = ref.widx;
         document.getElementById('w_' + sidx + '_' + widx).style.background = color;
-      }
-    })
+      })
+    }
+
   })
 </script>
 

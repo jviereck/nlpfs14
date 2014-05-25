@@ -4,7 +4,7 @@ function Document(data, excludeWords) {
 
   this.corefs = [];
   this.sentences = [];
-  this.words = [];
+  this.words = {};
   this.wordsSorted = [];
   this.modelFileNames = data.modelFileNames;
   this.parse = data.parse;
@@ -12,11 +12,166 @@ function Document(data, excludeWords) {
   this.parseData();
 }
 
+Document.prototype.setRefSentences = function(refSentences) {
+  this.refSentences = refSentences;
+  this.refSentencesMap = {};
+  refSentences.forEach(function(rank) {
+    this.refSentencesMap[rank.sidx] = rank.score
+  }, this);
+}
+
+function uniq(array) {
+  var res = [];
+  for (var i = 0; i < array.length; i++) {
+    if (res.indexOf(array[i]) === -1) {
+      res.push(array[i]);
+    }
+  }
+  return res;
+}
+
+Document.prototype.printDependency = function(sentence) {
+  var depRoot = sentence.dependencyRoot;
+
+  var seen = {};
+
+  function pWord(word) {
+    var ret = '(' + word[1].Weight.toFixed(1) + '|' + word[1].SubWeight.toFixed(1) + ') ' + word[0] + '[' + word[1].PartOfSpeech + ']';
+    if (word[1].Ignore) {
+      return '*' + ret;
+    } else {
+      return ret;
+    }
+  }
+
+  function printWord(word, indent) {
+    (word[1].Deps || []).forEach(function(dep) {
+      console.log(indent + pWord(word) + ' -(' + dep[0] + ')-> ' + pWord(dep[1]));
+
+      printWord(dep[1], indent + '| ');
+    })
+  }
+
+  printWord(depRoot, '');
+}
+
+var requiredParts = {
+  'ALL': ['det'],
+  'VBD': ['nsubj', 'dobj', 'det', 'prt']
+}
+
+function getDep(word, type) {
+  var ref = word[1].Deps.filter(function(ref) {
+    return ref[0] === type;
+  });
+  if (ref.length > 0) {
+    return ref[0][1];
+  } else {
+    return null;
+  }
+}
+
+Document.prototype.getSummary = function() {
+  var sentence = this.sentences[0];
+
+  var maxLen = 75;
+
+  function gatterSubtrees(word, isRoot) {
+    var pos = word[1].PartOfSpeech;
+  }
+
+  function printSubtree(word, extraLength, isRoot) {
+    var pos = word[1].PartOfSpeech;
+
+    if (word[1].Ignore) {
+      if (isRoot) {
+        var newRootWord = getDep(word, 'ccomp')
+        return printSubtree(newRootWord, extraLength, isRoot);
+      } else {
+        return [];
+      }
+    }
+
+    var required = requiredParts.ALL.concat(requiredParts[pos] || []);
+    var requiredWords = required.map(function(requiredType) {
+      if (word[1].Deps === undefined) {
+        return null;
+      }
+      var depWord = getDep(word, requiredType);
+      if (depWord) {
+        return printSubtree(depWord, 0 /* Only the minimum for now */);
+      } else {
+        return null;
+      }
+    }).filter(function(entry) {
+      return !!entry;
+    })
+
+    return requiredWords.concat([[word]]);
+  }
+
+  return printSubtree(s.dependencyRoot, 0, true);
+}
+
 Document.prototype.getRefRankedSentence = function() {
   return this.refSentences.map(function(rank) {
     return '#' + rank.sidx + ': ' +
         this.sentences[rank.sidx].content + ' (' + rank.score.toFixed(3) + ')';
   }, this);
+}
+
+// Best Score: 11.615
+// Best Configuration: [0.75, 0.3, 2.9, 0.0, 0.8, 1.6 ]
+// Best Score: 11.753
+// Best Configuration: [1.50, 0.3, 2.1, 0.3, 0.6, 1.6 ]
+// Best Score: 11.753
+// Best Configuration: [2.50, 0.3, 0.6, 0.3, 0.4, 1.6 ]
+// Best Score: 11.753
+// Best Configuration: [3.00, 0.3, 0.9, 0.6, 0.4, 1.6 ]
+
+
+Document.prototype.rankSentences = function(
+    corefSum, wordSum, corefCount, wordCount, corefSumPower, wordSumPower) {
+  return this.sentences.map(function(sentence, sidx) {
+    var uCorefs = uniq(sentence.corefs);
+    var mainWords = sentence.mainWords;
+
+    var score = 0.0;
+
+    var t  = 0.0;
+    for (var i = 0; i < uCorefs.length; i++) {
+      t += Math.pow(uCorefs[i].parent.refs.length, corefSumPower);
+    }
+    score += corefSum * t;
+
+    t  = 0.0;
+    for (var i = 0; i < mainWords.length; i++) {
+      t += Math.pow(mainWords[i].parent.refs.length, wordSumPower);
+    }
+    score += wordSum * t;
+
+    score += corefCount * uCorefs.length;
+    score += wordCount * mainWords.length
+
+    return {
+      sidx: sidx,
+      score: score
+    }
+  }).sort(function(a, b) {
+    return b.score - a.score;
+  });
+}
+
+Document.prototype.rankOptimalSentences = function() {
+  return this.rankSentences.apply(this, [2.5, 0.3, 0.6, 0.3, 0.4, 1.5999999999999999 ]);
+}
+
+
+Document.prototype.scoreSentences = function(
+  corefSum, wordSum, corefCount, wordCount, corefSumPower, wordSumPower) {
+  var bestSentence = this.rankSentences(
+    corefSum, wordSum, corefCount, wordCount, corefSumPower, wordSumPower)[0];
+  return this.refSentencesMap[bestSentence.sidx] || 0.0
 }
 
 Document.prototype.parseCorefs = function() {
@@ -67,9 +222,27 @@ Document.prototype.parseData = function() {
   this.data.parse.sentences.forEach(function(sentence, sidx) {
     sentence.corefs = [];
     sentence.content = sentence.text.join(' ');
+    sentence.mainWords = [];
 
-    // This adds the `parseNode` on each word.
-    sentence.parseRoot = parseSentenceTree(sentence);
+    sentence.dependencyRoot =
+      sentence.words[parseInt(sentence.dependencies.splice(0, 1)[0][2], 10) - 1];
+
+    var words = sentence.words;
+    // var deps = {};
+    sentence.dependencies.forEach(function(entry) {
+      var word = words[parseInt(entry[1], 10) - 1];
+      var dependent = words[parseInt(entry[2], 10) - 1];
+
+      if (word[1].Deps === undefined) {
+        word[1].Deps = [];
+      }
+
+      dependent[1].DepParent = word;
+      word[1].Deps.push([
+        entry[0],
+        dependent
+      ]);
+    });
 
     sentence.words.forEach(function(wordData, widx) {
       word = wordData[1];
@@ -95,12 +268,16 @@ Document.prototype.parseData = function() {
         }
       }
 
-      this.words[word.Lemma].refs.push({
+      var ref = {
         sentence: sentence,
         sidx: sidx,
         word: word,
-        widx: widx
-      });
+        widx: widx,
+        parent: this.words[word.Lemma]
+      };
+      this.words[word.Lemma].refs.push(ref);
+
+      sentence.mainWords.push(ref);
     }, this);
   }, this);
 
@@ -115,6 +292,11 @@ Document.prototype.parseData = function() {
   })
 
   this.parseCorefs();
+
+  // This adds the `parseNode` on each word.
+  this.data.parse.sentences.forEach(function(sentence, sidx) {
+    sentence.parseRoot = parseSentenceTree(sentence);
+  });
 }
 
 function doIntersect(a, b) {
@@ -123,10 +305,13 @@ function doIntersect(a, b) {
 }
 
 Document.prototype.removeSayPhase = function() {
-  this.sentences.forEach(function(sentence) {
+  this.sentences.forEach(function(sentence, sidx) {
     var says = matchSayPhase(sentence.parseRoot);
 
-    says.forEach(function(say) {
+    says.filter(function(say) {
+      return sidx !== 0 || say.start !== 0;
+      // return true;
+    }).forEach(function(say) {
       // Mark the words that match with the says as "ignore".
       var words = sentence.words;
       for (var i = say.start; i < say.end; i++) {
@@ -147,6 +332,41 @@ Document.prototype.removeSayPhase = function() {
   // As some corefs were removed, sort the order once more.
   this.cleanupCorefs();
   return this;
+}
+
+Document.prototype.weightWords = function() {
+  this.sentences.forEach(function(sentence, sidx) {
+    // Reset all weights.
+    sentence.words.forEach(function(word) {
+      word[1].Weight = 0.2 /* Every word has some weight ;) */;
+      word[1].SubWeight = 0;
+    });
+
+    sentence.corefs.forEach(function(coref) {
+      var words = sentence.words;
+      for (var i = coref.start; i < coref.end; i++) {
+        words[i][1].Weight = coref.parent.refs.length;
+      }
+    });
+
+    sentence.mainWords.forEach(function(wordRef) {
+      var word = wordRef.word;
+      word.Weight = Math.max(word.Weight, wordRef.parent.refs.length);
+    });
+
+    // Compute the weights for the subtrees.
+    sentence.words.forEach(function(wordData) {
+      if (wordData[1].Deps === undefined /* Check for leaf dependency */) {
+        var weight = wordData[1].Weight;
+        var parent = wordData[1].DepParent;
+        while (parent) {
+          parent[1].SubWeight += weight;
+          parent = parent[1].DepParent;
+        }
+      }
+    });
+  }, this);
+
 }
 
 Document.prototype.getRepresentiveSentences = function() {
