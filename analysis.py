@@ -76,6 +76,7 @@ if __name__ == '__main__':
                     json.dumps({
                         'path': doc.path,
                         'models': doc.models,
+                        'modelFileNames': doc.modelFileNames,
                         'parse': parsed_data
                     },indent=2))
                 found = True

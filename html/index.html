@@ -2,6 +2,7 @@
 <html>
   <head>
  	  <script src="zepto.js"></script>
+     <script src="doc.js"></script>
     <meta charset="UTF-8">
     <title>NLP Analysis Tool</title>
   </head>
@@ -19,92 +20,9 @@
 <script>
   var files = [];
   var currentFileIdx = -1;
-  var data = {};
-  var corefs = [];
-  var sentences = [];
-  var words = null;
-  var wordsSorted = null;
+  var doc = null;
+
   var excludeWords = [];
-
-  function isLeave(str) {
-    var open = str.indexOf('(');
-    var close = str.indexOf(')');
-    return (open === -1 || open > close);
-  }
-
-  var parseWordIdx = 0;
-  var parseSentence = null;
-
-  function Node(parentNode, kind, text) {
-    this.parent = parentNode;
-    this.kind = kind;
-    this.children = [];
-    this.text = text;
-    this.start = parseWordIdx;
-    this.end = parseWordIdx + 1;
-
-    if (text !== '') { // Ugly hack to check if node is a leave.
-      parseSentence.words[this.start][1].ParseNode = this;
-    }
-  }
-
-  function parseNode(str, parentNode) {
-    var space = str.indexOf(' ');
-    var kind = str.substring(0, space);
-
-    if (isLeave(str)) {
-      var close = str.indexOf(')');
-      parentNode.children.push(new Node(parentNode, kind, str.substring(space + 1, close)));
-      parseWordIdx += 1;
-      return close + 1;
-    } else {
-      var newNode = new Node(parentNode, kind, '');
-      parentNode.children.push(newNode);
-
-      var end = space;
-      while (str[end] == ' ') {
-        end = parseNode(str.substring(end + 2), newNode) + end + 2;
-      }
-
-      // Update the text and wordEnd of the node based on the text of the child
-      // nodes.
-      newNode.text = newNode.children.map(function(child) {
-        return child.text;
-      }).join(' ').trim();
-      newNode.end = parseWordIdx;
-
-      return end + 1;
-    }
-  }
-
-  function parseSentenceTree(sentence) {
-    parseWordIdx = 0;
-    parseSentence = sentence;
-    var str = sentence.parsetree.substring(1);
-    var root = new Node(null, 'START', '');
-    parseNode(str, root);
-    return root.children[0];
-  }
-
-  function matchSayPhase(node) {
-    var c = node.children;
-    var res = [];
-    // Check if this node matches.
-    for (var i = 0; i < c.length - 1; i++) {
-      if (c[i].kind === 'NP' && c[i + 1].kind === 'VP' && /say|said|says/.test(c[i + 1].text)) {
-        // Assume the next word is directly "say/said/says". The VP part
-        // can be very long and it shouldn't all be ignored!
-        res.push({start: c[i].start, end: c[i].end + 1 });
-      }
-    }
-
-    // Check all the children.
-    for (var i = 0; i < c.length; i++) {
-      res = res.concat(matchSayPhase(c[i]));
-    }
-
-    return res;
-  }
 
   $.get('exclude_word.txt', function(content) {
     content.split('\n').forEach(function(line) {
@@ -161,95 +79,11 @@
     return '<strong>' + str + '</strong>';
   }
 
-  function parseCorefs(data) {
-    corefs = data.coref.map(function(entries) {
-      var obj = {
-        representive: entries[0][1][0],
-        refs: []
-      }
-      function addRef(subEntry) {
-        obj.refs.push({
-          text: subEntry[0],
-          sentence: subEntry[1],
-          head: subEntry[2],
-          start: subEntry[3],
-          end: subEntry[4]
-        });
-      }
-
-      // Add the representive itself to the references.
-      addRef(entries[0][1]);
-
-      // Add the other coreferences to the references as well.
-      entries.forEach(function(entry) {
-        addRef(entry[0]);
-      })
-      return obj;
-    }).sort(function(a, b) {
-      return b.refs.length - a.refs.length;
-    });
-  }
-
-  function parseData(data) {
-    words = {};
-    parseCorefs(data.parse);
-
-    s = data.parse.sentences[0];
-
-    data.parse.sentences.forEach(function(sentence, sidx) {
-      sentence.content = sentence.text.join(' ');
-
-      // This adds the `parseNode` on each word.
-      parseSentenceTree(sentence);
-
-      sentence.words.forEach(function(wordData, widx) {
-        word = wordData[1];
-
-        // Only look at verbs and nouns.
-        if (!word.PartOfSpeech.startsWith('VB')
-           && !word.PartOfSpeech.startsWith('NN')
-        )
-        {
-          return;
-        }
-
-        // There are some words that occure quite often (e.g. `be`), which are
-        // excluded in this analysis.
-        if (excludeWords.indexOf(word.Lemma) !== -1) {
-          return;
-        }
-
-        if (!words[word.Lemma]) {
-          words[word.Lemma] = {
-            lemma: word.Lemma,
-            refs: []
-          }
-        }
-
-        words[word.Lemma].refs.push({
-          sentence: sentence,
-          sidx: sidx,
-          word: word,
-          widx: widx
-        });
-      });
-    });
-
-    wordsSorted = Object.keys(words).sort(function(a, b) {
-      return words[b].refs.length - words[a].refs.length;
-    }).map(function(wordLemma) {
-      return words[wordLemma];
-    }).filter(function(word) {
-      return word.refs.length >= 3; // Only keep words that are mentioned 3 or more times.
-    })
-  }
-
-
 
   function updateUI() {
     function mapCoref(coref, cidx) {
       var rep = coref.refs[0];
-      var headWord = sentences[rep.sentence].words[rep.head];
+      var headWord = doc.sentences[rep.sentence].words[rep.head];
 
       return tr(
         td(coref.refs.length) +
@@ -266,18 +100,15 @@
     }
 
     setHTML('article', files[currentFileIdx])
-    setHTML('models', ul(data.models.map(li).join('')));
-    setHTML('coref', table(corefs.map(mapCoref).join('')));
-    setHTML('sentences', ul(sentences.map(mapSentence).join('')));
+    setHTML('models', ul(doc.data.models.map(li).join('')));
+    setHTML('coref', table(doc.corefs.map(mapCoref).join('')));
+    setHTML('sentences', ul(doc.sentences.map(mapSentence).join('')));
 
   }
 
   function currentFileIndexChanged() {
     $.getJSON('data/' + files[currentFileIdx], function(json) {
-      data = json;
-      sentences = data.parse.sentences;
-
-      parseData(data);
+      doc = new Document(json, excludeWords);
       updateUI();
     });
   }
@@ -325,7 +156,7 @@
 
     self.attr('style', 'background: ' + color);
 
-    var coref = corefs[self.data('coref')];
+    var coref = doc.corefs[self.data('coref')];
     coref.refs.forEach(function(ref) {
       var sidx = ref.sentence;
       for (var widx = ref.start; widx < ref.end; widx++) {
