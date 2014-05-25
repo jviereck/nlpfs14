@@ -71,44 +71,114 @@ function getDep(word, type) {
   }
 }
 
+// Returns a list of words that was added when this word got added.
+function takeWord(word) {
+  var wordData = word[1];
+  wordData.Clean = false;
+
+  var wordsTaken = [];
+  if (!wordData.Taken) {
+    // If the word itself was not taken, then take it!
+    wordData.Taken = true;
+
+    // Ignore the word if it is marked as an ignore-one.
+    if (!wordData.Ignore) {
+      wordsTaken.push(word);
+    }
+  }
+
+  // Now, take all the words that are the minimum words as well.
+  for (var i = 0; i < wordData.MinWords.length; i++) {
+    wordsTaken.push.apply(wordsTaken, takeWord(wordData.MinWords[i]));
+  }
+
+  return wordsTaken;
+}
+
+function updateMinCost(word, isRoot) {
+  var wordData = word[1];
+  if (wordData.Clean) {
+    return;
+  }
+
+  // If the word is not jet taken, then:
+  var minWords = [];
+
+  function computeNewCostValues() {
+    wordData.MinWords = minWords;
+    wordData.MinCost = minWords.reduce(function(p, c) { return p + c[1].MinCost; }, 0);
+    wordData.Reward = minWords.reduce(function(p, c) { return p + c[1].Reward; }, 0);
+
+    if (!wordData.Taken) {
+      wordData.MinCost += wordData.Cost;
+      wordData.Reward += wordData.Weight;
+    }
+
+    console.log('Updated minCost: ' + word[0], wordData.MinCost, wordData.Reward, wordData.MinWords);
+
+    wordData.RewardRatio = wordData.Reward / wordData.MinCost;
+    wordData.Clean = true;
+  }
+
+  if (wordData.Ignore) {
+    if (isRoot || isRoot === undefined) {
+      var newRootWord = getDep(word, 'ccomp')
+      if (newRootWord) {
+        updateMinCost(newRootWord, isRoot);
+        minWords = [newRootWord];
+        computeNewCostValues();
+        return;
+      } else {
+        return;
+      }
+    } else {
+      return;
+    }
+  }
+
+
+  if (wordData.Deps !== undefined) {
+    if (!wordData.Taken) {
+      // If the node was not yet taken, then ensure the minimal elements for the
+      // dependecy are included when this word is taken.
+      var pos = wordData.PartOfSpeech;
+      var required = requiredParts.ALL.concat(requiredParts[pos] || []);
+      for (var i = 0; i < required.length; i++) {
+        var requiredType = required[i];
+        var depWord = getDep(word, requiredType);
+        if (depWord) {
+          updateMinCost(depWord, false /* NOT ROOT */);
+          minWords.push(depWord);
+        }
+      }
+    } else {
+      // Update the minCost for all the dependence and look for the one that
+      // has the biggest reward at the smallest cost.
+      var bestRewardRatio = -1.0;
+      var bestDepWord = null;
+      for (var i = 0; i < wordData.Deps.length; i++) {
+        var dep = wordData.Deps[i];
+        var depWord = dep[1];
+        updateMinCost(depWord, false /* Not root element, sorry */);
+        if (depWord[1].RewardRatio > bestRewardRatio) {
+          bestDepWord = depWord;
+        }
+      }
+      // The minimum word to add is now the one with the best reward ratio.
+      minWords = [bestDepWord];
+    }
+  }
+
+  computeNewCostValues();
+}
+
 Document.prototype.getSummary = function() {
   var sentence = this.sentences[0];
 
   var maxLen = 75;
 
-  function gatterSubtrees(word, isRoot) {
-    var pos = word[1].PartOfSpeech;
-  }
 
-  function printSubtree(word, extraLength, isRoot) {
-    var pos = word[1].PartOfSpeech;
 
-    if (word[1].Ignore) {
-      if (isRoot) {
-        var newRootWord = getDep(word, 'ccomp')
-        return printSubtree(newRootWord, extraLength, isRoot);
-      } else {
-        return [];
-      }
-    }
-
-    var required = requiredParts.ALL.concat(requiredParts[pos] || []);
-    var requiredWords = required.map(function(requiredType) {
-      if (word[1].Deps === undefined) {
-        return null;
-      }
-      var depWord = getDep(word, requiredType);
-      if (depWord) {
-        return printSubtree(depWord, 0 /* Only the minimum for now */);
-      } else {
-        return null;
-      }
-    }).filter(function(entry) {
-      return !!entry;
-    })
-
-    return requiredWords.concat([[word]]);
-  }
 
   return printSubtree(s.dependencyRoot, 0, true);
 }
@@ -340,6 +410,8 @@ Document.prototype.weightWords = function() {
     sentence.words.forEach(function(word) {
       word[1].Weight = 0.2 /* Every word has some weight ;) */;
       word[1].SubWeight = 0;
+      word[1].Cost = word[0].length + 1; // The cost ist just the length of the word.
+      word[1].Taken = false;
     });
 
     sentence.corefs.forEach(function(coref) {
