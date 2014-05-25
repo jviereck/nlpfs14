@@ -12,6 +12,13 @@ function Document(data, excludeWords) {
   this.parseData();
 }
 
+Document.prototype.getRefRankedSentence = function() {
+  return this.refSentences.map(function(rank) {
+    return '#' + rank.sidx + ': ' +
+        this.sentences[rank.sidx].content + ' (' + rank.score.toFixed(3) + ')';
+  }, this);
+}
+
 Document.prototype.parseCorefs = function() {
   var self = this;
   this.corefs = this.data.parse.coref.map(function(entries) {
@@ -40,7 +47,15 @@ Document.prototype.parseCorefs = function() {
       addRef(entry[0]);
     })
     return obj;
-  }, this).sort(function(a, b) {
+  }, this);
+
+  this.cleanupCorefs();
+}
+
+Document.prototype.cleanupCorefs = function() {
+  this.corefs = this.corefs.filter(function(coref) {
+    return coref.refs.length > 0;
+  }).sort(function(a, b) {
     return b.refs.length - a.refs.length;
   });
 }
@@ -128,7 +143,31 @@ Document.prototype.removeSayPhase = function() {
       }
     });
   }, this);
+
+  // As some corefs were removed, sort the order once more.
+  this.cleanupCorefs();
+  return this;
 }
+
+Document.prototype.getRepresentiveSentences = function() {
+  return this.sentences.map(function(sentence) {
+    var words = sentence.words.slice(); // Copy the array
+
+    sentence.corefs.slice().sort(function(a, b) {
+      return b.start - a.start;
+    }).forEach(function(coref) {
+      words.splice(
+          coref.start, coref.end - coref.start,
+          [coref.parent.representive, {Coref: coref}]);
+    });
+
+    return words.filter(function(word) {
+      return word[1].Ignore === undefined;
+    }).map(function(word) {
+      return word[0]
+    }).join(' ');
+  }, this);
+};
 
 // ############################################################################
 // === Helper functions ===

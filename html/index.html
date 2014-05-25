@@ -5,23 +5,36 @@
      <script src="doc.js"></script>
     <meta charset="UTF-8">
     <title>NLP Analysis Tool</title>
+    <style>
+      .word-ignore {
+        color: gray;
+      }
+    </style>
   </head>
   <body>
     Navigate Articles:
     <button onclick="showPrevious()">Previous</button>
     <button onclick="showNext()">Next</button>
     <button onclick="showRandom()">Random!</button>
+    <button onclick="selectArticle()">Select</button>
     <h3>Models: <span id="article"></span></h3>
+    <div id="models"></div>
+    <h3>Score Sentence:</h3>
+    <div id="score_sentence"></div>
     <div id="models"></div>
     <h3>Corefs</h3>
     <div id="coref"></div>
-    <h3>Sentences</h3>
+    <h3>
+      Sentences
+      <button onclick="removeSayPhase()">RemoveSayPhase</button>
+    </h3>
     <div id="sentences"></div>
 <script>
   var files = [];
   var currentFileIdx = -1;
   var doc = null;
 
+  var sentenceRanking = {};
   var excludeWords = [];
 
   $.get('exclude_word.txt', function(content) {
@@ -29,6 +42,25 @@
       excludeWords.push(line.split('\t')[1].trim());
     })
   })
+
+  $.get('sentence_ranking.txt', function(content) {
+    content.split('\n').forEach(function(line) {
+      var splits = line.split('\t');
+      var rankings = [];
+      for (var i = 1; i < splits.length; i += 2) {
+        rankings.push({
+          sidx: parseInt(splits[i]),
+          score: parseFloat(splits[i + 1])
+        });
+      }
+      sentenceRanking[splits[0]] = rankings;
+    })
+  })
+
+  function removeSayPhase() {
+    doc.removeSayPhase();
+    updateUI();
+  }
 
   function pRefs(coref) {
     coref.refs.forEach(function(ref) { console.log(ref.text)});
@@ -95,12 +127,16 @@
 
     function mapSentence(sentence, sidx) {
       return li(sentence.words.map(function(word, widx) {
-        return span(word[0] + ' ', {id: 'w_' + sidx + '_' + widx});
+        return span(word[0] + ' ', {
+          id: 'w_' + sidx + '_' + widx,
+          'class': word[1].Ignore ? 'word-ignore' : ''
+        });
       }).join(''));
     }
 
     setHTML('article', files[currentFileIdx])
     setHTML('models', ul(doc.data.models.map(li).join('')));
+    setHTML('score_sentence', ul(doc.getRefRankedSentence().map(li).join('')));
     setHTML('coref', table(doc.corefs.map(mapCoref).join('')));
     setHTML('sentences', ul(doc.sentences.map(mapSentence).join('')));
 
@@ -109,6 +145,7 @@
   function currentFileIndexChanged() {
     $.getJSON('data/' + files[currentFileIdx], function(json) {
       doc = new Document(json, excludeWords);
+      doc.refSentences = sentenceRanking[doc.parse.file_name];
       s = doc.sentences[0];
       updateUI();
     });
@@ -127,6 +164,21 @@
   function showRandom() {
     currentFileIdx = Math.round(Math.random() * (files.length - 1));
     currentFileIndexChanged();
+  }
+
+  function selectArticle() {
+    var name = prompt('Give me the name of the article to show:');
+    if (!name) {
+      return;
+    }
+    name = name.replace('.', '_');
+    var idx = files.indexOf(name + '.json');
+    if (idx === -1) {
+      alert('Sorry, could not find article :/');
+    } else {
+      currentFileIdx = idx;
+      currentFileIndexChanged();
+    }
   }
 
 

@@ -24,10 +24,10 @@ function uesc(str) { return str.replace('_', '.'); }
 function f(i) { if (i < 10) { return '0' + i; } else { return '' + i; } }
 
 function extractSentencesMapper(doc) {
-  return doc.sentences.map(function(sentence, index) {
+  return doc.getRepresentiveSentences().map(function(sentenceText, index) {
     return {
       id: esc(doc.parse.file_name) + '-' + f(index),
-      text: sentence.content
+      text: sentenceText
     }
   });
 }
@@ -65,14 +65,17 @@ var execConfig = {
   docMapper: extractSentencesMapper,
   rougeMaxBytes: 9999,
   rougeResultHandler: extractSentencesResultHandler,
-  runRougeOnly: true,
-  computeRouge: false,
+  runRougeOnly: false,
+  computeRouge: true,
 }
 
 var docs = inputFiles.map(function(filename) {
-  return new Document(
+  var doc = new Document(
     JSON.parse(fs.readFileSync('data/' + filename + '.json', 'utf8')),
     excludeWords);
+
+  doc.removeSayPhase();
+  return doc;
 });
 
 if (!execConfig.runRougeOnly) {
