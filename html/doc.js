@@ -51,7 +51,7 @@ Document.prototype.parseData = function() {
     sentence.content = sentence.text.join(' ');
 
     // This adds the `parseNode` on each word.
-    parseSentenceTree(sentence);
+    sentence.parseRoot = parseSentenceTree(sentence);
 
     sentence.words.forEach(function(wordData, widx) {
       word = wordData[1];

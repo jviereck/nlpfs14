@@ -39,20 +39,25 @@ function extractSentencesResultHandler(scores) {
   _.forEach(scores, function(results, peerId) {
     var docName = peerId.split('-')[0];
     if (docs[docName] === undefined) {
-      docs[docName] = {
-        sIdx: -1,
-        score: 0.0
-      };
+      docs[docName] = []
     }
-    var score = results['ROUGE-1 Average_F'].score;
-    if (score > docs[docName].score) {
-      docs[docName].score = score;
-      docs[docName].sIdx = parseInt(peerId.split('-')[1]);
-    }
+    var score = results['ROUGE-1 Average_F'].score + results['ROUGE-2 Average_F'].score;
+    docs[docName].push({
+      score: score,
+      sIdx: parseInt(peerId.split('-')[1])
+    });
   });
 
-  _.forEach(docs, function(bestSentence, docName) {
-    console.log(uesc(docName) + '\t' + bestSentence.sIdx + '\t' + bestSentence.score);
+  _.forEach(docs, function(scores, docName) {
+    scores = scores.sort(function(a, b) {
+      return b.score - a.score;
+    }).slice(0, 3);
+
+    var out = uesc(docName) + '\t';
+    out += scores.map(function(ranking) {
+      return ranking.sIdx + '\t' + ranking.score.toFixed(3);
+    }).join('\t');
+    console.log(out);
   })
 }
 
@@ -60,7 +65,8 @@ var execConfig = {
   docMapper: extractSentencesMapper,
   rougeMaxBytes: 9999,
   rougeResultHandler: extractSentencesResultHandler,
-  runRougeOnly: false
+  runRougeOnly: true,
+  computeRouge: false,
 }
 
 var docs = inputFiles.map(function(filename) {
@@ -130,23 +136,9 @@ if (!execConfig.runRougeOnly) {
   fs.writeFileSync('rouge.in', rougeInputContent);
 }
 
-var rougeRoot =
-  '/Users/jviereck/Documents/ETH/2014FS/NaturalLanguageProcessing/project/rouge/';
-
-// Spawning the rough script:
-var exec = require('child_process').exec;
-
-var execStr = rougeRoot + 'ROUGE-1.5.5.pl -e ' + rougeRoot + 'data ' +
-      '-a -c 95 -b ' + execConfig.rougeMaxBytes + ' -m -n 4 -w 1.2 rouge.in > output.txt';
-
-console.log('Executing: ' + execStr);
-
-exec(execStr, function (error, stdout, stderr) {
-  if (error !== null) {
-    console.log('exec error: ' + error);
-  } else {
-    var res = {};
-    stdout.split('\n').forEach(function(line) {
+function processRougeOutput() {
+  var res = {};
+    fs.readFileSync('rouge.output.txt', 'utf8').split('\n').forEach(function(line) {
       var re = /^(\S+) (ROUGE\S+ Average_[RPF]): (\d+\.\d+) \(95%-conf.int. (\d+\.\d+) \- (\d+\.\d+)\)/;
       var match = re.exec(line);
       if (!match) return;
@@ -163,5 +155,27 @@ exec(execStr, function (error, stdout, stderr) {
       }
     });
     execConfig.rougeResultHandler(res);
-  }
-});
+}
+
+if (execConfig.computeRouge) {
+  var rougeRoot =
+  '/Users/jviereck/Documents/ETH/2014FS/NaturalLanguageProcessing/project/rouge/';
+
+  // Spawning the rough script:
+  var exec = require('child_process').exec;
+
+  var execStr = rougeRoot + 'ROUGE-1.5.5.pl -e ' + rougeRoot + 'data ' +
+        '-a -c 95 -b ' + execConfig.rougeMaxBytes + ' -m -n 4 -w 1.2 rouge.in > rouge.output.txt';
+
+  console.log('Executing: ' + execStr);
+
+  var child = exec(execStr, { maxBuffer: 1024 * 1024 * 1024 },function (error, stdout, stderr) {
+    if (error !== null) {
+      console.log('exec error: ' + error);
+    } else {
+      processRougeOutput();
+    }
+  });
+} else {
+  processRougeOutput();
+}
