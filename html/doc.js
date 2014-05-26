@@ -57,7 +57,12 @@ Document.prototype.printDependency = function(sentence) {
 
 var requiredParts = {
   'ALL': ['det'],
-  'VBD': ['nsubj', 'dobj', 'det', 'prt']
+  'VB': ['nsubj', 'dobj', 'det', 'prt', 'aux']
+}
+
+var requiredTransition = {
+  'conj': ['cc'],
+  'prep': ['pobj']
 }
 
 function getDep(word, type) {
@@ -95,17 +100,28 @@ function takeWord(word) {
   return wordsTaken;
 }
 
-function updateMinCost(word, isRoot) {
+function updateMinCost(word, isRoot, minWords) {
   var wordData = word[1];
   if (wordData.Clean) {
     return;
   }
 
   // If the word is not jet taken, then:
-  var minWords = [];
+  minWords = minWords || [];
+  wordData.Clean = true;
 
   function computeNewCostValues() {
     wordData.MinWords = minWords;
+
+    if (minWords.length === 0 && wordData.Taken) {
+      wordData.Alive = false;
+      console.log('Word is now dead: ' + word[0]);
+      wordData.MinCost = 0;
+      wordData.Reward = 0;
+      wordData.RewardRatio = Math.NaN;
+      return;
+    }
+
     wordData.MinCost = minWords.reduce(function(p, c) { return p + c[1].MinCost; }, 0);
     wordData.Reward = minWords.reduce(function(p, c) { return p + c[1].Reward; }, 0);
 
@@ -117,12 +133,17 @@ function updateMinCost(word, isRoot) {
     console.log('Updated minCost: ' + word[0], wordData.MinCost, wordData.Reward, wordData.MinWords);
 
     wordData.RewardRatio = wordData.Reward / wordData.MinCost;
-    wordData.Clean = true;
   }
 
   if (wordData.Ignore) {
     if (isRoot || isRoot === undefined) {
-      var newRootWord = getDep(word, 'ccomp')
+      var newRootWord = getDep(word, 'ccomp');
+      for (var i = 0; i < wordData.Deps.length; i++) {
+        if (!wordData.Deps[i][1][1].Ignore) {
+          newRootWord = wordData.Deps[i][1];
+          break;
+        }
+      }
       if (newRootWord) {
         updateMinCost(newRootWord, isRoot);
         minWords = [newRootWord];
@@ -136,22 +157,36 @@ function updateMinCost(word, isRoot) {
     }
   }
 
+  function computeRequiredParts(required) {
+    var wordList = [];
+    for (var i = 0; i < required.length; i++) {
+      var requiredType = required[i];
+      var depWord = getDep(word, requiredType);
+      if (depWord) {
+        updateMinCost(depWord, false /* NOT ROOT */);
+        wordList.push(depWord);
+      }
+    }
+    return wordList;
+  }
+
+  function computeRewardRatio(wordList) {
+    var minCost = wordList.reduce(function(p, c) { return p + c[1].MinCost; }, 0);
+    var reward = wordList.reduce(function(p, c) { return p + c[1].Reward; }, 0);
+    return reward / minCost;
+  }
 
   if (wordData.Deps !== undefined) {
     if (!wordData.Taken) {
       // If the node was not yet taken, then ensure the minimal elements for the
       // dependecy are included when this word is taken.
-      var pos = wordData.PartOfSpeech;
+      var pos = wordData.PartOfSpeech.substring(0, 2);
       var required = requiredParts.ALL.concat(requiredParts[pos] || []);
-      for (var i = 0; i < required.length; i++) {
-        var requiredType = required[i];
-        var depWord = getDep(word, requiredType);
-        if (depWord) {
-          updateMinCost(depWord, false /* NOT ROOT */);
-          minWords.push(depWord);
-        }
-      }
-    } else {
+
+      minWords = minWords.concat(computeRequiredParts(required));
+    }
+
+    if (minWords.length == 0) {
       // Update the minCost for all the dependence and look for the one that
       // has the biggest reward at the smallest cost.
       var bestRewardRatio = -1.0;
@@ -159,13 +194,32 @@ function updateMinCost(word, isRoot) {
       for (var i = 0; i < wordData.Deps.length; i++) {
         var dep = wordData.Deps[i];
         var depWord = dep[1];
-        updateMinCost(depWord, false /* Not root element, sorry */);
-        if (depWord[1].RewardRatio > bestRewardRatio) {
+
+        var requirdParts = requiredTransition[dep[0]] || [];
+        var wordList = computeRequiredParts(requirdParts);
+        updateMinCost(depWord, false /* Not root element, sorry */, wordList);
+        // wordList.push(depWord);
+
+        if (depWord[1].Alive && depWord[1].RewardRatio > bestRewardRatio) {
           bestDepWord = depWord;
         }
       }
+
       // The minimum word to add is now the one with the best reward ratio.
-      minWords = [bestDepWord];
+      // Might be that there is no best word anymore. That is the case, if all
+      // the sub words have been added already.
+      if (bestDepWord !== null) {
+        // If the word was not taken yet, maybe it's better to NOT add any
+        // sub dependencies here?
+        if (!wordData.Taken) {
+          var ownRewardRatio = wordData.Weight / wordData.Cost;
+          if (ownRewardRatio < bestRewardRatio) {
+            minWords.push(bestDepWord);
+          }
+        } else {
+          minWords.push(bestDepWord);
+        }
+      }
     }
   }
 
@@ -173,14 +227,30 @@ function updateMinCost(word, isRoot) {
 }
 
 Document.prototype.getSummary = function() {
-  var sentence = this.sentences[0];
+  var sentence = this.sentences[doc.refSentences[0].sidx];
 
   var maxLen = 75;
 
+  var root = sentence.dependencyRoot;
 
-
-
-  return printSubtree(s.dependencyRoot, 0, true);
+  var words = [];
+  var cost = 0;
+  var lastCost = 0;
+  var lastText;
+  while (cost < maxLen) {
+    lastText = text;
+    updateMinCost(root);
+    words = words.concat(takeWord(root));
+    words.sort(function(a, b) { return a[1].Idx - b[1].Idx; });
+    var text = words.map(function(word) { return word[0];}).join(' ');
+    cost = text.length;
+    console.log(text);
+    if (cost == lastCost) {
+      return;
+    }
+    lastCost = cost;
+  }
+  return lastText;
 }
 
 Document.prototype.getRefRankedSentence = function() {
@@ -378,10 +448,25 @@ Document.prototype.removeSayPhase = function() {
   this.sentences.forEach(function(sentence, sidx) {
     var says = matchSayPhase(sentence.parseRoot);
 
-    says.filter(function(say) {
+    says = says.filter(function(say) {
       return sidx !== 0 || say.start !== 0;
       // return true;
-    }).forEach(function(say) {
+    });
+
+    // HACK: Also remove things like "BRUSSELS" here.
+    if (sentence.text[0] === sentence.text[0].toUpperCase() &&
+        sentence.text[0].length > 3) {
+      var rrbIndex = sentence.text.indexOf('-RRB-');
+      if (rrbIndex < 8) {
+        says.push({
+          start: 0,
+          end: rrbIndex
+        });
+      }
+      // Let's hope these always match ;)
+    }
+
+    says.forEach(function(say) {
       // Mark the words that match with the says as "ignore".
       var words = sentence.words;
       for (var i = say.start; i < say.end; i++) {
@@ -407,11 +492,13 @@ Document.prototype.removeSayPhase = function() {
 Document.prototype.weightWords = function() {
   this.sentences.forEach(function(sentence, sidx) {
     // Reset all weights.
-    sentence.words.forEach(function(word) {
+    sentence.words.forEach(function(word, widx) {
       word[1].Weight = 0.2 /* Every word has some weight ;) */;
       word[1].SubWeight = 0;
       word[1].Cost = word[0].length + 1; // The cost ist just the length of the word.
       word[1].Taken = false;
+      word[1].Alive = true;
+      word[1].Idx = widx;
     });
 
     sentence.corefs.forEach(function(coref) {

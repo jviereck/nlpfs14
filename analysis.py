@@ -19,10 +19,11 @@ class SimpleTextCleaner(BaseEstimator,TransformerMixin):
 
     def transform(self,documents):
         for doc in documents:
-            # Nothing todo here for now.
-            pass
-            # doc.text = re.sub("`|'|\"","",doc.text)
-            # doc.text = re.sub("(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\.","\\1",doc.text)
+            splits = doc.text.split(' ')
+            firstWord = splits[0]
+            if firstWord.isupper() and ')' in splits and splits.find(')') < 9:
+                doc.text = doc[doc.text.find(')'):]
+
         return documents
 
 class SimpleTextParser(BaseEstimator,TransformerMixin):
